@@ -1,0 +1,39 @@
+# Core data analysis libraries
+pandas>=2.0.0
+numpy>=1.24.0
+
+# For future automation features
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+
+# For fuzzy string matching (useful for business name matching)
+fuzzywuzzy>=0.18.0
+python-Levenshtein>=0.21.0
+
+# For working with Excel files (in case future data comes in Excel format)
+openpyxl>=3.1.0
+
+# For API integrations (Google Places, etc.)
+googlemaps>=4.10.0
+
+# For email validation
+email-validator>=2.0.0
+
+# For handling different text encodings
+chardet>=5.0.0
+
+# For progress bars during processing
+tqdm>=4.65.0
+
+# For configuration management
+python-dotenv>=1.0.0
+
+# For logging improvements
+colorlog>=6.7.0
+
+# For web scraping and business lookup
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+
+# For environment variables
+python-dotenv>=1.0.0
