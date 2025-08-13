@@ -30,12 +30,12 @@ from business_lookup import BusinessContactScraper
 # Load environment variables
 load_dotenv()
 
-# Configure logging
+# Configure logging with UTF-8 encoding
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('prospects_lookup.log'),
+        logging.FileHandler('prospects_lookup.log', encoding='utf-8'),
         logging.StreamHandler()
     ]
 )
@@ -54,6 +54,10 @@ class ProspectsContactLookup:
         self.successful_lookups = 0
         self.failed_lookups = 0
         self.emails_found = 0
+        
+        # Track successful and failed businesses
+        self.successful_businesses = []
+        self.failed_businesses = []
         
         # Google Places API free tier limits (per day)
         self.api_limits = {
@@ -143,36 +147,57 @@ class ProspectsContactLookup:
             self.failed_lookups += 1
             return None
     
-    def update_prospect_row(self, row, business_data):
+    def create_airtable_row(self, original_row, business_data=None):
         """
-        Update a prospect row with found business data
+        Create a clean row for Airtable import (removing unnecessary columns)
+        """
+        # Base columns for Airtable
+        airtable_row = {
+            'Name': original_row.get('Name', ''),
+            'Address': original_row.get('Address', ''),
+            'Suburb': original_row.get('Suburb', ''),
+            'Postcode': original_row.get('Postcode', ''),
+            'LGA': original_row.get('LGA', ''),
+            'Licensee': original_row.get('Licensee', ''),
+            'Licensee ABN': original_row.get('Licensee ABN', ''),
+            'Facebook Link': '',
+            'Instagram link': '',
+            'Email Address': '',
+            'Additional Email': '',
+            'Phone Number': ''
+        }
+        
+        # Add found contact data if available
+        if business_data:
+            if business_data.get('phone'):
+                airtable_row['Phone Number'] = business_data['phone']
+            
+            if business_data.get('website'):
+                airtable_row['Facebook Link'] = business_data['website']  # Using Facebook field for website
+            
+            if business_data.get('emails'):
+                airtable_row['Email Address'] = business_data['emails'][0]
+                
+                # If multiple emails found, add second one to Additional Email field
+                if len(business_data['emails']) > 1:
+                    airtable_row['Additional Email'] = business_data['emails'][1]
+                    
+                    # If more than 2 emails, add remaining to Instagram field
+                    if len(business_data['emails']) > 2:
+                        remaining_emails = ', '.join(business_data['emails'][2:])
+                        airtable_row['Instagram link'] = f"More emails: {remaining_emails}"
+        
+        return airtable_row
+    
+    def has_contact_info(self, business_data):
+        """
+        Check if business data contains email addresses (our success criteria)
         """
         if not business_data:
-            return row
+            return False
         
-        # Update contact fields
-        if business_data.get('phone'):
-            row['Phone Number'] = business_data['phone']
-        
-        if business_data.get('website'):
-            row['Facebook Link'] = business_data['website']  # Using Facebook field for website
-        
-        if business_data.get('emails'):
-            # Use the first email found
-            row['Email Address'] = business_data['emails'][0]
-            
-            # Add note about additional emails if found
-            if len(business_data['emails']) > 1:
-                additional_emails = ', '.join(business_data['emails'][1:])
-                current_notes = row.get('Notes', '')
-                row['Notes'] = f"{current_notes} | Additional emails: {additional_emails}"
-        
-        # Update notes with lookup timestamp
-        current_notes = row.get('Notes', '')
-        lookup_note = f"Contact lookup: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-        row['Notes'] = f"{current_notes} | {lookup_note}" if current_notes else lookup_note
-        
-        return row
+        # Success criteria: Must have at least one email address
+        return bool(business_data.get('emails'))
     
     def process_prospects(self, csv_file, output_file=None, start_index=0):
         """
@@ -206,11 +231,16 @@ class ProspectsContactLookup:
             # Lookup business contacts
             business_data = self.lookup_business_contacts(row)
             
-            # Update the row in the original dataframe
-            if business_data:
-                updated_row = self.update_prospect_row(row, business_data)
-                for column, value in updated_row.items():
-                    df.at[original_idx, column] = value
+            # Create clean Airtable row
+            airtable_row = self.create_airtable_row(row, business_data)
+            
+            # Categorize based on whether email addresses were found
+            if self.has_contact_info(business_data):
+                self.successful_businesses.append(airtable_row)
+                logger.info("SUCCESS: Email address found - added to successful list")
+            else:
+                self.failed_businesses.append(airtable_row)
+                logger.info("RETRY: No email address found - added to retry list")
             
             # Rate limiting to be respectful
             time.sleep(2)
@@ -219,18 +249,62 @@ class ProspectsContactLookup:
             if idx % 5 == 0:
                 logger.info(f"Progress: {idx}/{len(processing_df)} completed")
         
-        # Save updated CSV
-        if output_file is None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-            output_file = f"data/Prospects_with_Contacts_{timestamp}.csv"
+        # Save separate CSV files
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         
-        df.to_csv(output_file, index=False)
-        logger.info(f"Updated prospects saved to: {output_file}")
+        # File 1: Businesses with contact info (ready for Airtable)
+        if self.successful_businesses:
+            successful_file = f"data/Contacts_Found_{timestamp}.csv"
+            successful_df = pd.DataFrame(self.successful_businesses)
+            successful_df.to_csv(successful_file, index=False)
+            logger.info(f"Businesses with email addresses saved to: {successful_file}")
+        
+        # File 2: Businesses without contact info (for retry/AI processing)
+        if self.failed_businesses:
+            failed_file = f"data/No_Contacts_Found_{timestamp}.csv"
+            failed_df = pd.DataFrame(self.failed_businesses)
+            failed_df.to_csv(failed_file, index=False)
+            logger.info(f"Businesses needing retry saved to: {failed_file}")
+        
+        # Remove processed businesses from original CSV to avoid duplicates in future runs
+        self.remove_processed_businesses(df, start_index, end_index, csv_file)
         
         # Print summary
         self.print_summary()
         
-        return df
+        return self.successful_businesses, self.failed_businesses
+    
+    def remove_processed_businesses(self, df, start_index, end_index, original_csv_file):
+        """
+        Remove processed businesses from the original CSV file
+        """
+        try:
+            # Create backup of original file
+            backup_file = f"{original_csv_file}.backup_{datetime.now().strftime('%Y%m%d_%H%M')}"
+            df_backup = df.copy()
+            df_backup.to_csv(backup_file, index=False)
+            logger.info(f"Backup created: {backup_file}")
+            
+            # Remove the processed rows
+            remaining_df = df.drop(df.index[start_index:end_index])
+            
+            # Save updated original file
+            remaining_df.to_csv(original_csv_file, index=False)
+            
+            processed_count = end_index - start_index
+            remaining_count = len(remaining_df)
+            
+            logger.info(f"Removed {processed_count} processed businesses from original CSV")
+            logger.info(f"Remaining businesses in queue: {remaining_count}")
+            
+            if remaining_count > 0:
+                logger.info(f"Next run will start with: {remaining_df.iloc[0]['Name']} in {remaining_df.iloc[0]['Suburb']}")
+            else:
+                logger.info("All businesses have been processed!")
+            
+        except Exception as e:
+            logger.error(f"Error removing processed businesses: {e}")
+            logger.info("Original CSV file remains unchanged")
     
     def print_summary(self):
         """
@@ -240,18 +314,29 @@ class ProspectsContactLookup:
         logger.info("CONTACT LOOKUP SUMMARY")
         logger.info("=" * 80)
         logger.info(f"Total API calls made: {self.api_calls_made}")
-        logger.info(f"Successful lookups: {self.successful_lookups}")
-        logger.info(f"Failed lookups: {self.failed_lookups}")
+        logger.info(f"Businesses with EMAIL addresses found: {len(self.successful_businesses)}")
+        logger.info(f"Businesses needing retry (no emails): {len(self.failed_businesses)}")
         logger.info(f"Total emails found: {self.emails_found}")
-        logger.info(f"Success rate: {self.successful_lookups/(self.successful_lookups + self.failed_lookups)*100:.1f}%")
+        
+        total_processed = len(self.successful_businesses) + len(self.failed_businesses)
+        if total_processed > 0:
+            success_rate = len(self.successful_businesses) / total_processed * 100
+            logger.info(f"Email success rate: {success_rate:.1f}%")
         
         logger.info(f"\nAPI Usage Breakdown:")
         logger.info(f"Search calls: {self.api_limits['search_calls']}")
         logger.info(f"Details calls: {self.api_limits['details_calls']}")
         logger.info(f"Daily limit remaining: {self.api_limits['daily_limit'] - self.api_calls_made}")
         
-        if self.successful_lookups > 0:
-            logger.info(f"Average emails per successful lookup: {self.emails_found/self.successful_lookups:.1f}")
+        if len(self.successful_businesses) > 0:
+            avg_emails = self.emails_found / len(self.successful_businesses)
+            logger.info(f"Average emails per successful business: {avg_emails:.1f}")
+        
+        logger.info(f"\nFiles Generated:")
+        if self.successful_businesses:
+            logger.info(f"SUCCESS: Contacts_Found_*.csv - {len(self.successful_businesses)} businesses ready for Airtable")
+        if self.failed_businesses:
+            logger.info(f"RETRY: No_Contacts_Found_*.csv - {len(self.failed_businesses)} businesses for AI/manual retry")
 
 
 def main():
@@ -261,7 +346,7 @@ def main():
     # Configuration
     GOOGLE_API_KEY = os.getenv("GOOGLE_PLACES_API")
     PROSPECTS_FILE = "data/New_Prospects_20250809.csv"
-    MAX_LOOKUPS = 20  # Limit for testing/free tier
+    MAX_LOOKUPS = 500  # Limit for testing/free tier
     START_INDEX = 0   # Which prospect to start from (0 = first)
     
     # Validate API key
@@ -283,12 +368,13 @@ def main():
         logger.info(f"Starting contact lookup for {MAX_LOOKUPS} prospects...")
         logger.info(f"Using API key: ...{GOOGLE_API_KEY[-8:] if GOOGLE_API_KEY else 'None'}")
         
-        updated_df = processor.process_prospects(
+        successful_businesses, failed_businesses = processor.process_prospects(
             PROSPECTS_FILE,
             start_index=START_INDEX
         )
         
         logger.info("\nContact lookup completed successfully!")
+        logger.info(f"Results: {len(successful_businesses)} with emails, {len(failed_businesses)} need retry")
         
     except KeyboardInterrupt:
         logger.info("\nProcess interrupted by user")
