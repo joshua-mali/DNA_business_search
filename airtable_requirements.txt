@@ -1,0 +1,4 @@
+# Requirements for Airtable Upload Script
+pyairtable
+python-dotenv
+

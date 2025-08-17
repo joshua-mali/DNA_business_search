@@ -61,7 +61,7 @@ class ProspectsContactLookup:
         
         # Google Places API free tier limits (per day)
         self.api_limits = {
-            'daily_limit': 2500,  # Free tier daily limit
+            'daily_limit': 5000,  # Free tier daily limit
             'search_calls': 0,    # Text search calls
             'details_calls': 0,   # Place details calls
         }
@@ -245,9 +245,10 @@ class ProspectsContactLookup:
             # Rate limiting to be respectful
             time.sleep(2)
             
-            # Progress update
-            if idx % 5 == 0:
-                logger.info(f"Progress: {idx}/{len(processing_df)} completed")
+            # Progress update every 25 businesses for large batches
+            if idx % 25 == 0:
+                logger.info(f"Progress: {idx}/{len(processing_df)} completed ({idx/len(processing_df)*100:.1f}%)")
+                logger.info(f"Success rate so far: {len(self.successful_businesses)}/{idx} = {len(self.successful_businesses)/idx*100:.1f}%")
         
         # Save separate CSV files
         timestamp = datetime.now().strftime("%Y%m%d_%H%M")
@@ -346,7 +347,7 @@ def main():
     # Configuration
     GOOGLE_API_KEY = os.getenv("GOOGLE_PLACES_API")
     PROSPECTS_FILE = "data/New_Prospects_20250809.csv"
-    MAX_LOOKUPS = 500  # Limit for testing/free tier
+    MAX_LOOKUPS = 4126  # Process all remaining businesses
     START_INDEX = 0   # Which prospect to start from (0 = first)
     
     # Validate API key
@@ -367,6 +368,19 @@ def main():
     try:
         logger.info(f"Starting contact lookup for {MAX_LOOKUPS} prospects...")
         logger.info(f"Using API key: ...{GOOGLE_API_KEY[-8:] if GOOGLE_API_KEY else 'None'}")
+        
+        # Warning for large batch processing
+        if MAX_LOOKUPS > 1000:
+            logger.warning("=" * 60)
+            logger.warning("LARGE BATCH PROCESSING WARNING")
+            logger.warning("=" * 60)
+            logger.warning(f"Processing {MAX_LOOKUPS} businesses will:")
+            logger.warning(f"- Use ~{MAX_LOOKUPS} Google API calls")
+            logger.warning(f"- Take approximately {MAX_LOOKUPS * 2 / 3600:.1f} hours to complete")
+            logger.warning(f"- Cost ~${MAX_LOOKUPS * 0.017:.2f} if over free tier limit")
+            logger.warning("Press Ctrl+C within 10 seconds to cancel...")
+            logger.warning("=" * 60)
+            time.sleep(10)
         
         successful_businesses, failed_businesses = processor.process_prospects(
             PROSPECTS_FILE,

@@ -1,0 +1,4 @@
+# Minimal requirements for download test
+# Note: boto3 is included in Lambda runtime
+
+requests>=2.31.0

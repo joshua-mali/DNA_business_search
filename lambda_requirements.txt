@@ -1,0 +1,21 @@
+# AWS Lambda Requirements
+# Note: boto3 is already available in Lambda runtime
+
+# Core data processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Web requests and scraping
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+
+# String matching for deduplication
+fuzzywuzzy>=0.18.0
+python-Levenshtein>=0.21.0
+
+# For working with dates and times
+python-dateutil>=2.8.0
+
+# For handling different encodings
+chardet>=5.0.0

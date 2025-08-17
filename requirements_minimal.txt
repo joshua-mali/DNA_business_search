@@ -1,0 +1,4 @@
+# Ultra minimal requirements for Lambda function
+# Note: boto3 and pandas are provided by Lambda runtime/layer
+
+requests>=2.31.0

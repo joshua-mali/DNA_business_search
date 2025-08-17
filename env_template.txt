@@ -1,0 +1,8 @@
+# Airtable Configuration
+AIRTABLE_API_TOKEN=your_airtable_api_token_here
+AIRTABLE_BASE_ID=your_airtable_base_id_here
+AIRTABLE_TABLE_NAME=your_table_name_here
+
+# Optional: Set to True for testing mode (prints data instead of uploading)
+TEST_MODE=False
+
